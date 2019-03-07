@@ -1,0 +1,426 @@
+---
+title: "HW03: Reference Counting Garbage Collector"
+layout: "homework"
+list-of-files: ["memoryVM.c", "memoryVMObject.c", "dataDef.h"]
+publish: now
+deadline-early: "2018-04-14 24:00"
+deadline-final: "2018-04-17 24:00"
+author: "Vladimír Štill"
+editor: "Peter Stanko"
+editor-email: "stanko@mail.muni.cz"
+---
+
+= HW03: Reference Counting Garbage Collector
+
+Doplnění zadání:
+
+* _zatím nic_
+
+== Představení úkolu
+
+Některé novější programovací jazyky, jako je třeba Java nebo C#
+umožňují uživateli nestarat se o správu paměti. Tyto jazyky většinou používají takzvaný
+_Garbage Collector_ pro uvolňování nepoužívané paměti.
+Takový přístup umožňuje snadnější programování, ale tyto jazyky za něj platí
+výrazně nižší rychlostí než má C nebo C++. Někdy by se ale i programátorovi v C
+hodilo mít možnost alespoň část zodpovědnosti za řízení paměti přesunout na nějakou knihovnu.
+Vaším úkolem je jednoduchou knihovnu k tomuto účelu vytvořit.
+
+Nemusíte se obávat, že bych po vás chtěl dosáhnout toho, co umí GC (_Garbage Collector_) v Javě nebo C#.
+Vaším úkolem bude vytvořit knihovnu pro počítání referencí na paměť a to navíc jen takovou,
+kde programátor bude muset sám žádat o zvyšování a snižování čítače referencí.
+Možná si říkáte, k čemu taková věc může být? V praxi se ale mnohdy setkáváme se
+situací, kdy je s dynamickou pamětí zacházeno na mnoha místech a nemusí být jasné,
+kdy už ji nikdo nepoužívá. Počítání referencí pak může hodně pomoci.
+
+Počítání referencí funguje tak, že před každým použitím ukazatele na paměť je
+zvýšen čítač patřící k tomuto ukazateli. Po skončení používání paměti je čítač snížen.
+Pokud čítač klesne na 0, je paměť považována za nepoužívanou a může být uvolněna.
+Uvolnění může (ale nemusí) nastat okamžitě -- to nechám na vás, důležité však je, že čítač
+již nesmí být možné zvýšit z 0.
+
+Tento způsob práce z pamětí je jednoduchý, v praxi se ale nepoužívá proto,
+že v případě cyklických referencí čítač na 0 nikdy neklesnout nemusí.
+Tento patologický stav ve své implementaci nemusíte brát do úvahy.
+
+Další drobnou vlastností bude to, že vaše funkce budou vracet paměť vynulovanou.
+Céčko to normálně nedělá, protože je zaměřené především na rychlost,
+ale neinicializovaná paměť může vést k řadě chyb z přehlédnutí, které se těžko ladí.
+
+== Zadání
+
+Vaším úkolem je vytvořit implementaci k hlavičkovému souboru `memoryVM.h`.
+
+[.alert.alert-warning]
+icon:exclamation-triangle[role="mr-2"] Soubor `memoryVM.h` neměňte, protože vaše verze **nebude** použita při testování
+Implementaci umístěte do souboru `memoryVM.c`.
+
+[.alert.alert-info]
+icon:info[role="mr-2"] Pokud budete potřebovat přidat do vašich souborů další systémové hlavičkové
+soubory, učiňte tak **před** hlavičkovými soubory tohoto úkolu (může to být nutné kvůli testování).
+
+== Požadavky
+
+=== Verejné API
+
+Všechny požadované funkce jsou definovány v hlavičkovém souboru `memoryVM.h`,
+kde jsou k nim i komentáře popisující co mají dělat.
+
+Funkce lze rozdělit do 3 kategorií:
+
+- alokační funkce (začínají `allocate`) slouží k alokaci nové paměti a jejímu vynulování.
+ Jedná se o funkce `allocate`, `allocateArray` a `allocateArray2D`.
+
+- `acquire` funkce slouží k zvyšování čítače referencí. Funkce `acquire`
+  je „univerzální“ funkce pro zvyšování čítače -- tedy musí fungovat na paměti alokované libovolnou
+  z `allocate` funkcí (včetně případných bonusových)
+
+- `release` funkce slouží k snižování čítače referencí.
+  Funkce `release` je „univerzální“ funkce pro snižování čítače -
+  tedy musí fungovat na paměti alokované libovolnou z allocate funkcí (včetně případných bonusových) +
+  Nemusíte dodržet kompatibilitu `allocate` a `release` s `malloc`, `free`,
+  takové použití zadání nedefinuje a nebude se testovat.
+
+Pro ukládání informací o alokované paměti máte v podstatě 2 možnosti:
+
+- _používat globální strukturu_ -- v tom případě tato struktura musí být dynamická,
+  tedy nesmí být alokovaná na zásobníku; nebo alokovaná na haldě ale s pevnou velikostí --
+  musí být schopná růst při běhu programu.
+
+- _globálním strukturám se lze vyhnout_, vyžaduje to však dobrou znalost fungování
+typového systému a ukazatelové aritmetiky
+
+=== Další podrobnosti pro počítání referencí
+
+- musí být možné počítat reference alespoň do `65535`
+
+- na paměti, kde čítač klesnul na `0`, nesmí být možné úspěšně zavolat `acquire`,
+  a zvýšit její čítač; chování takovéhoto volání není definované a může třeba způsobit pád programu
+
+- veškerá paměť, jejíž čítač se dostal na `0`, musí být po volání `clearVM` uvolněna.
+  Ostatní paměť musí zůstat dostupná, i když to může znamenat, že již nebude možné ji uvolnit.
+
+=== Funkce
+
+Implementujte následující funkce v souboru `memoryVM.c` podle hlaviček v `memoryVM.h`:
+
+[.alert.alert-danger]
+icon:exclamation[role="mr-2"] Pokud není chování funkce za určitých okolností definované,
+znamená to, že danou situaci nemusíte ve své implementaci ošetřovat a nebude se testovat.
+Program však nesmí _explicitně vykonat konkrétní netriviální operaci_,
+např. nesmí se pokusit zformátovat disk. Můžete použít např. `assert` nebo `abort`.
+
+[source,c]
+----
+bool initVM(void)
+----
+
+- inicializuje kontrolu paměti
+
+- zde můžete vytvořit globální strukturu, pokud ji potřebujete.
+
+- pokud funkce neuspěje, musí uvolnit všechnu paměť, kterou do té doby alokovala a vrátit `false`.
+`clearVM` ani další funkce v takovém případě nesmí byt volány
+
+- vrací `true` při úspěchu
+
+[source,c]
+----
+void clearVM(void)
+----
+
+- uvolní veškerou paměť, která byla používána pro funkce kontroly
+- po volání této funkce nesmí být alokovány žádné řízeně alokované bloky, jejichž
+  čítač referencí dosáhl `0`. To znamená, že pokud jste nedealokovali paměť
+  ihned při volání `release`, které snížilo čítač na `0`, musíte tak učinit nejpozději
+  při volání `clearVM`
+- bloky s nenulovým čítačem musí zůstat alokovány, a to i přesto,
+  ze to může znamenat, ze nebude možné je dealokovat
+
+[source,c]
+----
+void *allocate(size_t size)
+----
+
+- alokuje paměť dané velikosti a poznačí si že je paměť používaná.
+- `size` udává velikost bloku v bytech
+- inicializuje paměť na `0`
+- vrací ukazatel na alokovanou paměť nebo `NULL` při nedostatku paměti
+
+[source,c]
+----
+void *allocateArray(size_t elementSize, size_t elementCount)
+----
+
+- alokuje pole o velikosti elementu `elementSize`, délka pole bude `elementCount` prvků
+- poznačí si že je paměť používaná
+- inicializuje paměť na `0`
+- vrací ukazatel na alokované pole nebo `NULL` při nedostatku paměti
+
+[source,c]
+----
+void **allocateArray2D(size_t elementSize, size_t subarrays, size_t *elementCounts)
+----
+
+- alokuje dvojrozměrné (zubaté) pole. Tedy pole, které obsahuje `subarrays` polí
+  obsahujících elementy o velikosti `elementSize`
+- každé z vnitřních polí může mít různou délku, proto jsou délky jednotlivých polí
+  uloženy v poli délek `elementCounts`. Můžete se spolehnout, že délka `elementCounts`
+  je právě `subarrays`. Uvědomte si, že pole `elementCounts` již nemusí být k dispozici v době dealokace,
+  proto nemá smysl si ukládat ukazatel na něj
+- pokud je `elementCounts` rovno `NULL` alokujte všechna vnitřní pole o délce `subarrays`
+  (tedy pole bude čtvercové)
+- samozřejmě je nutné označit všechnu paměť jako používanou a pole vynulovat
+- vrací ukazatel na pole nebo `NULL` při nedostatku paměti
+- pokud dojde paměť v průběhu alokování, je nutné všechny do té doby alokované
+  bloky uvolnit a vrátit `NULL`.
+
+[source,c]
+----
+void acquire(void *memory)
+----
+
+- inkrementuje čítač referencí odpovídající dané adrese
+- chování není definováno pro paměť, která není alokovaná funkcemi této knihovny
+- musí fungovat pro paměť alokovanou libovolnou z `allocate` funkcí,
+  včetně `allocateArray2D` a těch z bonusu (pokud je přítomen).
+
+[source,c]
+----
+void acquireArray2D(void **array)
+----
+
+- inkrementuje čítač referencí na poli a všech jeho podpolích
+- chování není definováno pro paměť, která nebyla alokována pomocí `allocateArray2D`
+
+[source,c]
+----
+bool release(void *memory)
+----
+
+- sníží čítač referencí pro danou paměť
+- není definováno pokud paměť nebyla alokována funkcemi této knihovny
+- musí fungovat pro paměť alokovanou libovolnou z `allocate` funkcí,
+  včetně `allocateArray2D` a těch z bonusu (pokud je přítomen)
+- vrací `true` pokud čítač referencí klesnul na `0`
+
+[source,c]
+----
+bool releaseArray2D(void **array)
+----
+
+- sníží čítač referencí na daném 2D poli a všech jeho podpolích
+- není definováno pro paměť, která nebyla alokována pomocí `allocateArray2D`
+- vrací true pokud čítač referencí vnějšího pole klesnul na `0`
+
+=== Podrobnosti k chování funkcí
+
+- volání `allocate`, `acquire` a `release` **před** úspěšným `initVM` nebo po `clearVM`
+  není definováno a kupříkladu takto alokovaná paměť nemusí být korektně uvolňována
+- volání `acquire` a `release` na paměti, která nebyla alokována pomocí `allocate` není definováno.
+  To se vztahuje i na případy, kdy je daným funkcí předán ukazatel dovnitř správně alokované paměti
+- volání `free` na paměti alokované `allocate` není definováno
+- volání `acquire` a `release` na uvolněné paměti není definováno
+- `release` musí vracet `true` pokud počet referencí klesnul na `0`
+- paměť alokovanou pomocí `allocateArray` musí být možné uvolnit pomocí
+  jediného volání `release` (pokud bylo před tím počítadlo referencí na `1`)
+- paměť alokovanou pomocí `allocateArray2D` musí být možné uvolnit pomocí `release`
+  tak, že budou uvolněna jednotlivá vnitřní pole postupně každé zvlášť a rovněž i vnější pole
+  (několika voláními `release`).
+  Musí být možné uvolnit jen část vnitřních polí nebo jen vnější pole
+- paměť alokovanou pomocí `allocateArray2D` musí být možné uvolnit jedním
+  voláním `releaseArray2D`, pokud bylo počítadlo referencí na `1` pro hlavní pole i
+  všechna vnitřní pole. Pokud jsou hodnoty počítadla pro různé části pole různé, dojde k
+  uvolnění jen té paměti, jejíž čítač byl na hodnotě `1` před voláním funkce
+- volání `releaseArray2D` na 2D poli, které bylo částečně uvolněno, není definováno
+- pokud je `releaseArray2D` voláno na poli alokovaném `allocateArray2D`,
+  které má ale pro různá dílčí pole různé hodnoty čítače musí se s každým dílčím polem
+  zacházet odděleně (tedy je možné že `releaseArray2D` dealokuje jen část polí)
+- `releaseArray2D` vrací `true` právě tehdy, když bylo uvolněno vnější pole
+- volání `acquire` musí uspět kdykoli, kdy je jejím parametrem validní ukazatel na
+  paměť alokovanou pomocí některé z `allocate` funkcí, nezávisle na dalším stavu programu a systému
+- musí být možné (při dostatku paměti) alokovat pole o délce alespoň `INT_MAX` lokální platformy
+
+== Bonusové rozšíření
+
+Rozšíření může být hodnoceno až 3 body.
+
+=== Představení bonusu
+
+Druhou funkci naší knihovny může být inicializace paměti a uvolňování z pametí
+spojených prostředků po té, co již paměť není používaná.
+To se může hodit v mnoha případech, například je možné při inicializaci
+otevřít soubor a nakonec jej zase zavřít.
+Takové funkce běžně podporují objektově orientované
+jazyky jako C++, C# nebo Java, ale dají se (i když trochu neohrabaně) napodobit
+i v čistém C.
+
+K účelu inicializace a odklízení paměti budou sloužit funkce `allocateNew` a `release`
+(která je součástí běžného zadání). Funkce `allocateNew` budou brát jako parametr
+datovou definici obsahující délku datového typu a ukazatel na 2 funkce,
+inicializační funkci a „úklidovou“ funkci, neboli --
+terminologií objektově orientovaného programování -- _konstruktor_ a _destruktor_.
+
+- konstruktor bude volán ihned po alokaci paměti
+- destruktor bude volán těsně před dealokaci
+
+=== Zadání bonusu
+
+Vaším úkolem je vytvořit implementaci k hlavičkovému souboru `memoryVMObject.h`,
+včetně (vámi zvolené) reprezentace datových definic v souboru `dataDef.h`.
+
+[.alert.alert-warning]
+icon:exclamation-triangle[role="mr-2"] Soubor `memoryVMObject.h` neměňte, vaše
+verze **nebude** použita při testování. Implementaci umístěte do souboru `memoryVMObject.c`.
+
+=== API Bonusu
+
+V rámci bonusu implementujte funkce rodiny `allocateNew` a `createDataDef`.
+V obou případech jsou 3 varianty funkcí lišících se počtem parametrů předávaných
+inicializační funkci (konstruktoru). Funkce `allocateNew` funguje podobně jako `allocate`,
+ale po alokaci paměti je třeba zavolat konstruktor.
+Jelikož konstruktor se postará o inicializaci, nemusíte paměť před jeho voláním nulovat.
+Paměť alokovanou `allocateNew` musí být možné uvolnit (snížit čítač) pomocí `release`,
+stejně jako jakoukoli jinou paměti alokovanou pomocí této knihovny.
+Po snížení čítače na `0`, **před** dealokací, musí být zavolán destruktor.
+Rovněž tak ke zvyšování čítače stále slouží funkce `acquire`.
+
+Konstruktor i destruktor objektu berou jako první parametr ukazatel na paměť objektu.
+
+=== Funkce
+
+Implementujte následující funkce v souboru `memoryVMObject.c` podle hlaviček v `memoryVMObject.h`
+
+[source,c]
+----
+void* allocateNew0(dataDef0* def)
+----
+
+- alokuje paměť pro objekt popsaný definicí `def` a pokud alokace uspěje, spustí
+  na paměti příslušný konstruktor
+- pokud konstruktor neuspěje (vrátí `false`), je třeba uvolnit paměti
+- paměť musí být označena jako používaná
+- konstruktor nebude předpokládat, že je paměť vynulovaná
+
+[source,c]
+----
+void* allocateNew1(dataDef1* def, void* param1)
+----
+
+- totéž co `allocateNew0`, ale s parametrem, který bude předán konstruktoru
+
+[source,c]
+----
+void* allocateNew2(dataDef2* def, void* param1, void* param2)
+----
+
+- totéž co `allocateNew0`, ale s 2 parametry, které budou předány konstruktoru
+
+[source,c]
+----
+dataDef0* createDataDef0(size_t size, bool(*ctor)(void*), void(*dtor)(void*))
+----
+
+- vytvoří datovou definici objektu s bezparametrickou inicializací
+- `size` je velikost objektu v bytech
+- `ctor` je ukazatel na konstruktor
+- `dtor` je ukazatel na destruktor
+- datová definice bude v dynamicky alokované paměti na níž bude možné
+  volat `acquire` a `release`
+- při testování nebude předpokládáno nic o vnitřní struktuře datové definice,
+  můžete ji tedy vytvořit zcela libovolně
+
+[source,c]
+----
+dataDef1* createDataDef1(size_t size, bool(*ctor)(void*, void*), void(*dtor)(void*))
+----
+
+- totéž co `createDataDef0`, ale pro inicializaci 1 parametrem
+
+[source,c]
+----
+dataDef2* createDataDef2(size_t size, bool(*ctor)(void*, void*, void*), void(*dtor)(void*))
+----
+
+- totéž co `createDataDef0`, ale pro inicializaci 2 parametry
+
+Dále poskytněte definici následujících typů v `dataDef.h`:
+
+- `dataDef0`
+  - datová definice objektu s bezparametrickou inicializací
+- `dataDef1`
+  - datová definice objektu s inicializací 1 parametrem
+- `dataDef2`
+  - datová definice objektu s inicializací 2 parametry
+
+== Poznámky
+
+- v rámci programu není `main` funkce, doporučuji vám vytvořit si vlastní testovací `main`
+  a vše **důkladně otestovat**.
+- dávejte pozor na korektnost chování při nedostatku paměti. Bude to testováno
+- překlad na Aise:
+
+----
+gcc -Wall -Wextra -Werror -pedantic -std=c99 -ggdb3 -o memoryVM memoryVM.c main.c
+----
+
+- překlad bonusu:
+
+----
+gcc -Wall -Wextra -Werror -pedantic -std=c99 -ggdb3 -o memoryVM memoryVM.c memoryVMObject.c main.c
+----
+
+Všimněte si, že ačkoli C standardně neobsahuje datový typ `bool`,
+e v tomto úkole tento datový typ používán. To je umožněno standardem `C99`
+a hlavičkovým souborem `stdbool.h`
+
+=== Příklad použití konstruktoru (bonus)
+
+[source, c]
+----
+
+// datový typ
+typedef struct _safeLogger
+{
+    FILE *file;
+} safeLogger;
+
+// konstruktor
+bool initSafeLogger(void* memory, void* param)
+{
+    safeLogger *logger = (safeLogger*) memory;
+    const char *path   = (const char*) param;
+
+    logger->file = fopen(path, "a");
+    return logger->file != NULL;
+}
+
+// destruktor
+void closeSafeLogger(void* memory)
+{
+    safeLogger *logger = (safeLogger*) memory;
+
+    fclose(logger->file);
+}
+
+void priklad(void)
+{
+    // vytvoření definice
+    dataDef1* loggerDef = createDataDef1(sizeof(safeLogger), initSafeLogger, closeSafeLogger);
+
+    if (loggerDef != NULL) {
+        // vytvoření instance
+        const char *path = "soubor.txt";
+        safeLogger* logger = allocateNew1(loggerDef, path);
+        // uvolnění definice
+        release(loggerDef);
+
+        if(logger != NULL) {
+            // ... práce s instancí
+
+            // uvolnění, navíc zavolá destruktor
+            release(logger);
+        }
+    }
+}
+----
